@@ -18,11 +18,7 @@ type Client struct {
 func (client *Client) Connect(host string, port string) error {
 	err := client.conn.Connect(host, port)
 
-	if err == nil {
-		return err
-	}
-
-	return client.Reconnect()
+	return err
 }
 
 // Disconnect from the currently connected server
@@ -31,7 +27,7 @@ func (client *Client) Disconnect() {
 }
 
 func (client *Client) Reconnect() error {
-	return nil
+	return client.conn.Reconnect()
 }
 
 // Listens for data from the server forever
@@ -81,10 +77,10 @@ func (client *Client) QueryStatus() []byte {
 		case 1:
 			//Step 1. Challenge request
 			buf := bitbuf.NewWriter(100)
-			buf.WriteUint8(255)
-			buf.WriteUint8(255)
-			buf.WriteUint8(255)
-			buf.WriteUint8(255)
+			buf.WriteByte(255)
+			buf.WriteByte(255)
+			buf.WriteByte(255)
+			buf.WriteByte(255)
 			buf.WriteByte('T')
 			buf.WriteString("Source Engine Query\x00")
 			client.conn.Send(udp.NewPacket(-1, buf.Data()[:buf.BytesWritten()]))

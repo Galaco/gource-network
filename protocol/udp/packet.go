@@ -47,6 +47,7 @@ func (packet *Packet) ToBytes() []byte {
 }
 
 func NewPacket(receiveType int32, body []byte) *Packet {
+
 	return &Packet{
 		pktType: receiveType,
 		body: body,
