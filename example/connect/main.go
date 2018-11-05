@@ -2,10 +2,11 @@ package main
 
 import (
 	"github.com/BenLubar/steamworks"
+	"github.com/galaco/bitbuf"
 	"github.com/galaco/gource-network"
-	"github.com/galaco/gource-network/protocol"
 	"github.com/galaco/gource-network/protocol/udp"
 	"log"
+	"time"
 )
 
 func main() {
@@ -22,22 +23,34 @@ func main() {
 		FakeSteamId: 0x12345678,
 	})
 
-	// Register custom handlers for different packet types
-	client.RegisterPacketHandler(udp.TypeSvcPrint, func(packet protocol.IPacket) {
-		// this can do whatever, including pass back to the default handler
-		//log.Println(string(packet.ToBytes()))
-	})
+	registerHandlers(client)
 
 	// Performs the handshake; and provides information about
 	// server status (e.g. current map)
-	err = client.Connect("151.80.230.149", "27015")
+	err = client.Connect("142.44.143.138", "27015")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	client.Reconnect()
 
+	client.Listen()
+
+	for true {
+		log.Println("listening")
+		time.Sleep(5 * time.Second)
+	}
+
 	client.Disconnect()
 
 	log.Println("end")
+}
+
+func registerHandlers(client *network.Client) {
+	client.RegisterPacketHandler(udp.TypeNOP, func(packet *bitbuf.Reader) {
+		log.Println("nop")
+	})
+	client.RegisterPacketHandler(udp.TypeDisconnect, func(packet *bitbuf.Reader) {
+		log.Println("disconnected")
+	})
 }

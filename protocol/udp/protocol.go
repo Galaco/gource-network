@@ -19,7 +19,7 @@ func (client *Client) Disconnect() {
 	buf.WriteInt8(1)
 	buf.WriteString("Disconnect by User.")
 	buf.WriteByte(0)
-	client.Send(NewPacket(-1, buf.Data()[:buf.BytesWritten()]))
+	client.Send(NewPacket(buf.Data()[:buf.BytesWritten()]))
 
 	client.conn.Close()
 }
@@ -55,13 +55,13 @@ func (client *Client) Receive() (protocol.IPacket,error) {
 
 	// parse it into a packet
 
-	return NewPacket(0, buf[4:]), nil
+	return NewPacket(buf[4:]), nil
 }
 
 // Perform initial connection back and forth
 // with server
 // See README.md for an explanation on how this works
-func (client *Client) Reconnect() error {
+func (client *Client) Reconnect() (int,error) {
 	c := make(chan []byte)
 	challengeFunc := func(step int, c chan []byte) {
 		if step == 1 {
@@ -74,8 +74,9 @@ func (client *Client) Reconnect() error {
 			buf.WriteInt32(167679079)
 			buf.WriteString("0000000000")
 			buf.WriteByte(0)
+			log.Println("B2B")
 			log.Println(buf.Data()[:buf.BytesWritten()])
-			client.Send(NewPacket(-1,buf.Data()[:buf.BytesWritten()]))
+			client.Send(NewPacket(buf.Data()[:buf.BytesWritten()]))
 		}
 		if step == 2 {
 			pkt,_ := client.Receive()
@@ -112,7 +113,7 @@ func (client *Client) Reconnect() error {
 			buf.WriteInt32(0x03)
 			buf.WriteInt32(serverchallenge)
 			buf.WriteInt32(ourchallenge)
-			buf.WriteUint32(2729496039)
+			//buf.WriteUint32(2729496039)
 			buf.WriteString("DormantLemon^___") //player name
 			buf.WriteByte(0)
 			buf.WriteString("test789") //password
@@ -135,7 +136,7 @@ func (client *Client) Reconnect() error {
 				buf.WriteBytes(steamKey)
 			}
 
-			client.Send(NewPacket(-1, buf.Data()[:buf.BytesWritten()]))
+			client.Send(NewPacket(buf.Data()[:buf.BytesWritten()]))
 		}
 		if step == 2 {
 			// RECEIVE PACKET
@@ -151,6 +152,7 @@ func (client *Client) Reconnect() error {
 
 	if response[0] == 'B' {
 		log.Println("WE'VE CONNECTED!")
+		return 4, nil
 	} else {
 		log.Printf("UHOH. Bad data: %s\n", string(response))
 	}
@@ -158,9 +160,7 @@ func (client *Client) Reconnect() error {
 	log.Println(response)
 
 
-
-
-	return nil
+	return 4,nil
 }
 
 func NewClient() *Client {

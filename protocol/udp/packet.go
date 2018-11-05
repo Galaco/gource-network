@@ -34,22 +34,16 @@ const TypeSvcGameEventList = 30
 const TypeSvcGetCvarValue = 31
 
 type Packet struct {
-	pktType int32
 	body []byte
-}
-
-func (packet *Packet) Type() int {
-	return int(packet.pktType)
 }
 
 func (packet *Packet) ToBytes() []byte {
 	return packet.body
 }
 
-func NewPacket(receiveType int32, body []byte) *Packet {
+func NewPacket(body []byte) *Packet {
 
 	return &Packet{
-		pktType: receiveType,
 		body: body,
 	}
 }
