@@ -3,11 +3,14 @@ package network
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/BenLubar/steamworks"
+	"github.com/BenLubar/steamworks/steamauth"
 	"github.com/galaco/bitbuf"
 	"github.com/galaco/gource-network/internal"
 	"github.com/galaco/gource-network/protocol"
 	"github.com/galaco/gource-network/protocol/udp"
 	"log"
+	"time"
 )
 
 // Networking client
@@ -29,12 +32,18 @@ func (client *Client) Connect(host string, port string) error {
 
 // Disconnect from the currently connected server
 func (client *Client) Disconnect() {
+	buf := bitbuf.NewWriter(1024)
+	buf.WriteInt8(1)
+	buf.WriteString("Disconnect by User.")
+	buf.WriteByte(0)
+	client.SendPacket(buf, true)
+
 	client.conn.Disconnect()
 }
 
 func (client *Client) Reconnect() error {
 	var err error
-	client.connectionStep,err = client.conn.Reconnect()
+	client.connectionStep = 1
 	return err
 }
 
@@ -45,6 +54,8 @@ func (client *Client) Reconnect() error {
 // Callbacks should not process the packets themselves; expect crashes or bottlenecks
 // if they do.
 func (client *Client) Listen() {
+	client.connectionStep = 1
+
 	go func() {
 		for true {
 			pkt,err := client.conn.Receive()
@@ -53,10 +64,27 @@ func (client *Client) Listen() {
 			}
 			buf := bitbuf.NewReader(pkt.ToBytes())
 
+			header,_ := buf.ReadInt32()
+			connectionLess := int32(0)
+
+			buf.Reset()
+
+			if header == udp.PacketHeaderFlagQuery {
+				connectionLess = 1
+			}
+			log.Printf("Connectionless: %d\n", connectionLess)
+
+			if connectionLess > 0 {
+				log.Printf("Connectionless: %d\n", connectionLess)
+				client.handleConnectionlessPacket(buf, connectionLess)
+				continue
+			}
+
+			log.Println("NOT connectonless")
 			flags := client.channel.ReadPacketHeader(buf)
 			if flags == -1 {
 				log.Println("Bad packet!")
-				return
+				continue
 			}
 			if flags & packetFlagReliable != 0 {
 				bits,_ := buf.ReadBits(3)
@@ -90,6 +118,8 @@ func (client *Client) Listen() {
 				bt,_ := buf.ReadBits(6)
 				packetType := uint8(bt[0])
 
+				log.Println(packetType)
+
 				if ok := client.packetTypeHandlers[packetType]; ok != nil {
 					client.packetTypeHandlers[packetType](buf)
 				} else {
@@ -112,7 +142,14 @@ func (client *Client) Listen() {
 }
 
 // Send some data to the connected server
-func (client *Client) SendPacket(data *bitbuf.Writer) {
+func (client *Client) SendPacket(data *bitbuf.Writer, asDatagram bool) {
+	if asDatagram == true {
+		client.writePacketHeader(data)
+	}
+	client.conn.Send(udp.NewPacket(data.Data()[:data.BytesWritten()]))
+}
+
+func (client *Client) writePacketHeader(data *bitbuf.Writer) {
 	// @TODO add subchannel support
 
 	subchans := 0
@@ -160,9 +197,124 @@ func (client *Client) SendPacket(data *bitbuf.Writer) {
 		datagram.Seek(curPos)
 
 		client.channel.outSequenceNr++
-
-		client.conn.Send(udp.NewPacket(datagram.Data()[:datagram.BytesWritten()]))
 	}
+}
+
+func (client *Client) handleConnectionlessPacket(packet *bitbuf.Reader, state int32) {
+	log.Println("handling connectionless")
+	packet.ReadInt32()
+
+	header := byte(0)
+	//id := int32(0)
+	//total := uint8(0)
+	//number := uint8(0)
+	//splitsize := uint8(0)
+
+	if state == 1 {
+		header,_ = packet.ReadUint8()
+	} else {
+		packet.ReadInt32()
+		packet.ReadByte()
+		packet.ReadByte()
+		packet.ReadByte()
+	}
+
+	switch header {
+	case '9':
+		packet.ReadInt32()
+		msg,_ := packet.ReadString(1024)
+		log.Println(msg)
+		return
+	case 'A':
+		log.Println("A")
+		client.connectionStep = 2
+		packet.ReadInt32()
+		serverchallenge,_ := packet.ReadInt32()
+		ourchallenge,_ := packet.ReadInt32()
+
+		// CREATE NEW PACKET
+		buf := bitbuf.NewWriter(1000)
+		buf.WriteByte(255)
+		buf.WriteByte(255)
+		buf.WriteByte(255)
+		buf.WriteByte(255)
+		buf.WriteByte('k')
+		buf.WriteInt32(0x18)
+		buf.WriteInt32(0x03)
+		buf.WriteInt32(serverchallenge)
+		buf.WriteInt32(ourchallenge)
+		//buf.WriteUint32(2729496039)
+		buf.WriteString("DormantLemon^___") //player name
+		buf.WriteByte(0)
+		buf.WriteString("test789") //password
+		buf.WriteByte(0)
+		buf.WriteString("4630212") //game version
+		buf.WriteByte(0)
+
+		steamKey := make([]byte, 2048)
+
+		steamKey,_ = steamauth.CreateTicket()
+
+		localsid := steamworks.GetSteamID()
+
+		buf.WriteInt16(242)
+		steamid64 := uint64(localsid)
+		buf.WriteUint64(steamid64)
+
+		if len(steamKey) > 0 {
+			buf.WriteBytes(steamKey)
+		}
+
+		client.SendPacket(buf, false)
+		return
+	case 'B':
+		log.Println("B")
+		log.Println(client.connectionStep)
+		if client.connectionStep == 2 {
+			log.Println("B2!")
+			client.connectionStep = 3
+
+			senddata := bitbuf.NewWriter(2048)
+
+			senddata.WriteUnsignedBitInt32(6, 6)
+			senddata.WriteByte(2)
+			senddata.WriteInt32(-1)
+
+			senddata.WriteUnsignedBitInt32(4, 6)
+			senddata.WriteString("VModEnable 1")
+			senddata.WriteUnsignedBitInt32(4, 6)
+			senddata.WriteString("vban 0 0 0 0")
+
+			log.Println("handled B")
+			client.SendPacket(senddata, true)
+			log.Println("sent")
+		}
+	case 'I':
+		return
+	default:
+		log.Println("unknown packet...")
+		return
+	}
+}
+
+func (client *Client) keepAlive() {
+	go func() {
+		for true {
+			if client.connectionStep == 1 {
+				buf := bitbuf.NewWriter(1000)
+				buf.WriteByte(255)
+				buf.WriteByte(255)
+				buf.WriteByte(255)
+				buf.WriteByte(255)
+				buf.WriteByte('q')
+				buf.WriteInt32(167679079)
+				buf.WriteString("0000000000")
+				buf.WriteByte(0)
+				client.SendPacket(buf, false)
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}()
 }
 
 // Register a callback to make use of the received packet
@@ -227,14 +379,14 @@ func (client *Client) registerInternalHandlers() {
 			unknownCounter++
 
 			senddata.WriteUnsignedBitInt32(0, 20)
-			client.SendPacket(senddata)
+			client.SendPacket(senddata, true)
 
 			senddata = bitbuf.NewWriter(1000)
 			senddata.WriteUnsignedBitInt32(0, 6)
 			senddata.WriteUnsignedBitInt32(6, 6)
 			senddata.WriteByte(state)
 			senddata.WriteInt32(serverCount)
-			client.SendPacket(senddata)
+			client.SendPacket(senddata, true)
 		}
 
 		if client.connectionStep != 0 {
@@ -250,7 +402,7 @@ func (client *Client) registerInternalHandlers() {
 			senddata.WriteByte(state)
 			senddata.WriteInt32(serverCount)
 
-			client.SendPacket(senddata)
+			client.SendPacket(senddata, true)
 
 			return
 		}
@@ -272,6 +424,7 @@ func NewClient(serverProtocol protocol.IProtocol, info *ClientInfo) *Client {
 		connectionStep: 0,
 	}
 	c.registerInternalHandlers()
+	c.keepAlive()
 
 	return c
 }

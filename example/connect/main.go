@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"github.com/BenLubar/steamworks"
 	"github.com/galaco/bitbuf"
 	"github.com/galaco/gource-network"
 	"github.com/galaco/gource-network/protocol/udp"
 	"log"
-	"time"
+	"os"
 )
 
 func main() {
@@ -32,19 +34,24 @@ func main() {
 		log.Fatal(err)
 	}
 
-	client.Reconnect()
-
 	client.Listen()
 
-	for true {
-		log.Println("listening")
-		time.Sleep(5 * time.Second)
-	}
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Enter anything to disconnect: ")
+	text, _ := reader.ReadString('\n')
+	fmt.Println(text)
+
+	//for true {
+	//	log.Println("listening")
+	//	time.Sleep(5 * time.Second)
+	//}
 
 	client.Disconnect()
 
 	log.Println("end")
 }
+
+
 
 func registerHandlers(client *network.Client) {
 	client.RegisterPacketHandler(udp.TypeNOP, func(packet *bitbuf.Reader) {
