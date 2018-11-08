@@ -110,7 +110,7 @@ func NewChannel() *Channel {
 		outSequenceNrAck:        0,
 		outReliableState:        0,
 		inReliableState:     	 0,
-		outSequenceNr:			 0,
+		outSequenceNr:			 1,
 		signOnState:             2,
 		serverCount:             -1,
 		challengeNR:             0,

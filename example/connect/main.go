@@ -58,6 +58,10 @@ func registerHandlers(client *network.Client) {
 		log.Println("nop")
 	})
 	client.RegisterPacketHandler(udp.TypeDisconnect, func(packet *bitbuf.Reader) {
+		client.Disconnect()
 		log.Println("disconnected")
+	})
+	client.RegisterPacketHandler(udp.TypeSvcServerInfo, func(packet *bitbuf.Reader) {
+		log.Println(string(packet.Data()))
 	})
 }

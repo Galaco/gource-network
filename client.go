@@ -21,6 +21,7 @@ type Client struct {
 	packetTypeHandlers map[uint8]func(*bitbuf.Reader)
 
 	connectionStep int
+	signonState int
 }
 
 // Connect to remote server
@@ -33,7 +34,7 @@ func (client *Client) Connect(host string, port string) error {
 // Disconnect from the currently connected server
 func (client *Client) Disconnect() {
 	buf := bitbuf.NewWriter(1024)
-	buf.WriteInt8(1)
+	buf.WriteUnsignedBitInt32(1, 8)
 	buf.WriteString("Disconnect by User.")
 	buf.WriteByte(0)
 	client.SendPacket(buf, true)
@@ -72,15 +73,12 @@ func (client *Client) Listen() {
 			if header == udp.PacketHeaderFlagQuery {
 				connectionLess = 1
 			}
-			log.Printf("Connectionless: %d\n", connectionLess)
 
 			if connectionLess > 0 {
-				log.Printf("Connectionless: %d\n", connectionLess)
 				client.handleConnectionlessPacket(buf, connectionLess)
 				continue
 			}
 
-			log.Println("NOT connectonless")
 			flags := client.channel.ReadPacketHeader(buf)
 			if flags == -1 {
 				log.Println("Bad packet!")
@@ -115,10 +113,10 @@ func (client *Client) Listen() {
 			}
 
 			if buf.BitsRead() < buf.Size() {
-				bt,_ := buf.ReadBits(6)
-				packetType := uint8(bt[0])
+				bt,_ := buf.ReadByte()
+				packetType := uint8(bt)
 
-				log.Println(packetType)
+				log.Printf("Packettype: %d\n", packetType)
 
 				if ok := client.packetTypeHandlers[packetType]; ok != nil {
 					client.packetTypeHandlers[packetType](buf)
@@ -144,12 +142,12 @@ func (client *Client) Listen() {
 // Send some data to the connected server
 func (client *Client) SendPacket(data *bitbuf.Writer, asDatagram bool) {
 	if asDatagram == true {
-		client.writePacketHeader(data)
+		data = client.writePacketHeader(data)
 	}
 	client.conn.Send(udp.NewPacket(data.Data()[:data.BytesWritten()]))
 }
 
-func (client *Client) writePacketHeader(data *bitbuf.Writer) {
+func (client *Client) writePacketHeader(data *bitbuf.Writer) *bitbuf.Writer {
 	// @TODO add subchannel support
 
 	subchans := 0
@@ -159,16 +157,19 @@ func (client *Client) writePacketHeader(data *bitbuf.Writer) {
 
 	//Assemble packet
 	datagram := bitbuf.NewWriter(2048)
-	datagram.WriteInt32(client.channel.outSequenceNrAck)
+	datagram.WriteInt32(client.channel.outSequenceNr)
 	datagram.WriteInt32(client.channel.inSequenceNr)
 
 	flagPos := datagram.BitsWritten()
-	datagram.WriteByte(0)
+	datagram.WriteUint8(0) //flags
 	checksumPos := datagram.BitsWritten()
-	datagram.WriteUint16(0)
+	datagram.WriteUint16(0) //checksum (crc16)
 
 	checkSumStart := datagram.BytesWritten()
+
 	datagram.WriteByte(byte(client.channel.inReliableState))
+
+	//datagram.WriteUint32(908164834)
 
 
 	if subchans > 0 {
@@ -198,10 +199,15 @@ func (client *Client) writePacketHeader(data *bitbuf.Writer) {
 
 		client.channel.outSequenceNr++
 	}
+	// align to byte boundary
+	for datagram.BitsWritten() % 8 != 0 {
+		datagram.Seek(datagram.BitsWritten() + 1)
+	}
+
+	return datagram
 }
 
 func (client *Client) handleConnectionlessPacket(packet *bitbuf.Reader, state int32) {
-	log.Println("handling connectionless")
 	packet.ReadInt32()
 
 	header := byte(0)
@@ -223,10 +229,9 @@ func (client *Client) handleConnectionlessPacket(packet *bitbuf.Reader, state in
 	case '9':
 		packet.ReadInt32()
 		msg,_ := packet.ReadString(1024)
-		log.Println(msg)
+		log.Println("Kicked: " + msg)
 		return
 	case 'A':
-		log.Println("A")
 		client.connectionStep = 2
 		packet.ReadInt32()
 		serverchallenge,_ := packet.ReadInt32()
@@ -268,11 +273,11 @@ func (client *Client) handleConnectionlessPacket(packet *bitbuf.Reader, state in
 		client.SendPacket(buf, false)
 		return
 	case 'B':
-		log.Println("B")
-		log.Println(client.connectionStep)
-		if client.connectionStep == 2 {
-			log.Println("B2!")
+		if client.connectionStep < 3 {
+			log.Println("Connected successfully")
 			client.connectionStep = 3
+
+			//client.channel.PrepareStreams()
 
 			senddata := bitbuf.NewWriter(2048)
 
@@ -280,19 +285,20 @@ func (client *Client) handleConnectionlessPacket(packet *bitbuf.Reader, state in
 			senddata.WriteByte(2)
 			senddata.WriteInt32(-1)
 
-			senddata.WriteUnsignedBitInt32(4, 6)
-			senddata.WriteString("VModEnable 1")
+			senddata.WriteUnsignedBitInt32(4, 8)
+			senddata.WriteBytes([]byte("VModEnable 1"))
+			senddata.WriteByte(0)
 			senddata.WriteUnsignedBitInt32(4, 6)
 			senddata.WriteString("vban 0 0 0 0")
+			senddata.WriteByte(0)
 
-			log.Println("handled B")
 			client.SendPacket(senddata, true)
-			log.Println("sent")
+
+			time.Sleep(3 * time.Second)
 		}
 	case 'I':
 		return
 	default:
-		log.Println("unknown packet...")
 		return
 	}
 }
@@ -359,8 +365,12 @@ func (client *Client) QueryStatus() []byte {
 func (client *Client) registerInternalHandlers() {
 	unknownCounter := int(20)
 	client.RegisterPacketHandler(udp.TypeNetSignonState, func(packet *bitbuf.Reader) {
+		log.Println("type 6!")
 		state,_ := packet.ReadUint8()
 		serverCount,_ := packet.ReadInt32()
+
+		log.Println(state)
+		log.Println(serverCount)
 
 		if client.channel.signOnState == int32(state) {
 			return
